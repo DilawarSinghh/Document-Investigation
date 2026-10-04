@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireUserId, requireOwnedWorkspace } from "@/lib/auth";
 import { embedTexts, withBackoff } from "@/lib/gemini";
 import { extractClaims, compareClaims, synthesize } from "@/lib/groq";
 import type { ChunkRow } from "@/lib/types";
@@ -11,9 +12,14 @@ export async function POST(req: Request) {
   try {
     const { workspace_id, question, conversation_id } = await req.json();
     if (!workspace_id || !question?.trim()) return NextResponse.json({ error: "workspace_id and question required" }, { status: 400 });
+    const auth = await requireUserId();
+    if ("response" in auth) return auth.response;
     const admin = supabaseAdmin();
+    // Ownership gate: the service key bypasses RLS, so verify the workspace belongs to the caller.
+    const denied = await requireOwnedWorkspace(admin, workspace_id, auth.userId);
+    if (denied) return denied.response;
 
-    const ready = await admin.from("documents").select("id").eq("workspace_id", workspace_id).eq("status", "ready").limit(1);
+    const ready = await admin.from("documents").select("id").eq("workspace_id", workspace_id).eq("user_id", auth.userId).eq("status", "ready").limit(1);
     if (!ready.data?.length)
       return NextResponse.json({ verdict: "insufficient_evidence", answer: "No documents are ready yet. Upload files and wait for indexing to finish.", confidence: 0, citations: [], conflicts: [], uncertainty_note: "No indexed documents in this workspace." });
 
@@ -49,11 +55,12 @@ export async function POST(req: Request) {
     if (!ans.citations.length) { ans.verdict = "insufficient_evidence"; ans.uncertainty_note = "Retrieved evidence was too weak to cite. " + ans.uncertainty_note; }
 
     if (conversation_id) {
-      const uid = (await admin.from("conversations").select("user_id").eq("id", conversation_id).single()).data?.user_id;
-      if (uid) {
+      // Only persist to a conversation the caller owns in this workspace.
+      const conv = await admin.from("conversations").select("user_id").eq("id", conversation_id).eq("workspace_id", workspace_id).eq("user_id", auth.userId).single();
+      if (conv.data) {
         await admin.from("messages").insert([
-          { conversation_id, user_id: uid, role: "user", content: question },
-          { conversation_id, user_id: uid, role: "assistant", content: ans.answer, citations: ans.citations, verdict: ans.verdict, conflicts: ans.conflicts, confidence: ans.confidence, uncertainty_note: ans.uncertainty_note },
+          { conversation_id, user_id: auth.userId, role: "user", content: question },
+          { conversation_id, user_id: auth.userId, role: "assistant", content: ans.answer, citations: ans.citations, verdict: ans.verdict, conflicts: ans.conflicts, confidence: ans.confidence, uncertainty_note: ans.uncertainty_note },
         ]);
       }
     }

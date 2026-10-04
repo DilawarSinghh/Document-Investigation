@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireUserId, requireOwnedWorkspace } from "@/lib/auth";
 import { extractClaims, compareClaims } from "@/lib/groq";
 import type { ChunkRow } from "@/lib/types";
 
@@ -11,9 +12,13 @@ export async function POST(req: Request) {
   try {
     const { workspace_id } = await req.json();
     if (!workspace_id) return NextResponse.json({ error: "workspace_id required" }, { status: 400 });
+    const auth = await requireUserId();
+    if ("response" in auth) return auth.response;
     const admin = supabaseAdmin();
+    const denied = await requireOwnedWorkspace(admin, workspace_id, auth.userId);
+    if (denied) return denied.response;
     const { data: chunks } = await admin.from("chunks").select("content,page_number,section_title,document_id,documents!inner(filename,doc_date)")
-      .eq("workspace_id", workspace_id).limit(60);
+      .eq("workspace_id", workspace_id).eq("user_id", auth.userId).limit(60);
     type Row = { content: string; page_number: number; section_title: string | null; document_id: string; documents: { filename: string } | { filename: string }[] };
     const rows: ChunkRow[] = ((chunks ?? []) as unknown as Row[]).map((cc, i) => {
       const doc = Array.isArray(cc.documents) ? cc.documents[0] : cc.documents;

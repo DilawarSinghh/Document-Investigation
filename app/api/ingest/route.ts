@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireUserId, requireOwnedWorkspace } from "@/lib/auth";
 import { chunkPages, extractDocDate, sha256 } from "@/lib/chunk";
 import { embedTexts, ocrImage, withBackoff } from "@/lib/gemini";
 
@@ -23,11 +24,16 @@ export async function POST(req: Request) {
   try {
     const form = await req.formData();
     const workspace_id = String(form.get("workspace_id") ?? "");
-    const user_id = String(form.get("user_id") ?? "");
-    if (!workspace_id || !user_id) return NextResponse.json({ error: "workspace_id and user_id required" }, { status: 400 });
+    if (!workspace_id) return NextResponse.json({ error: "workspace_id required" }, { status: 400 });
+    // user_id always comes from the session — a spoofed client value could write into another user's data.
+    const auth = await requireUserId();
+    if ("response" in auth) return auth.response;
+    const user_id = auth.userId;
     const files = form.getAll("files").filter(Boolean) as File[];
     if (!files.length) return NextResponse.json({ error: "No files" }, { status: 400 });
     const admin = supabaseAdmin();
+    const denied = await requireOwnedWorkspace(admin, workspace_id, user_id);
+    if (denied) return denied.response;
     const results: { filename: string; status: string; error?: string }[] = [];
 
     for (const f of files) {

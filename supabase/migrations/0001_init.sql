@@ -126,6 +126,14 @@ language sql stable as $$
   order by combined desc limit p_k;
 $$;
 
--- Storage bucket (create via dashboard or SQL): insert into storage.buckets (id,name,public) values ('documents','documents',false);
--- Storage RLS example:
--- create policy "user docs" on storage.objects for all using (bucket_id='documents' and auth.uid()::text = (storage.foldername(name))[1]) with check (bucket_id='documents' and auth.uid()::text = (storage.foldername(name))[1]);
+-- Storage: private per-user bucket. Files are stored at <user_id>/<workspace_id>/<file>,
+-- so the foldername check isolates every user. The app reads chunk text from the DB
+-- (RLS-protected), never via public storage URLs.
+insert into storage.buckets (id, name, public)
+values ('documents', 'documents', false)
+on conflict (id) do nothing;
+
+drop policy if exists "user docs isolated" on storage.objects;
+create policy "user docs isolated" on storage.objects for all
+  using (bucket_id = 'documents' and auth.uid()::text = (storage.foldername(name))[1])
+  with check (bucket_id = 'documents' and auth.uid()::text = (storage.foldername(name))[1]);
