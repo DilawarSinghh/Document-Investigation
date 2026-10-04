@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { supabaseServer } from "./supabase";
+import { supabaseServer } from "./supabase-server";
 
 // Returns the authenticated user id from the session cookie, or a 401 response.
 export async function requireUserId(): Promise<{ userId: string } | { response: NextResponse }> {

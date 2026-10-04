@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { requireUserId, requireOwnedWorkspace } from "@/lib/auth";
 import { chunkPages, extractDocDate, sha256 } from "@/lib/chunk";
 import { embedTexts, ocrImage, withBackoff } from "@/lib/gemini";

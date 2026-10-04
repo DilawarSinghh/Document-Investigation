@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { requireUserId, requireOwnedWorkspace } from "@/lib/auth";
 import { embedTexts, withBackoff } from "@/lib/gemini";
 import { extractClaims, compareClaims, synthesize } from "@/lib/groq";

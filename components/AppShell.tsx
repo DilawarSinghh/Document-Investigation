@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useStore } from "@/store/useStore";
-import { supabaseBrowser } from "@/lib/supabase";
+import { supabaseBrowser } from "@/lib/supabase-browser";
 import { Chat } from "./Chat";
 import { SourceViewer } from "./SourceViewer";
 import { ConflictReport } from "./ConflictReport";

@@ -1,5 +1,5 @@
 "use client";
-import { supabaseBrowser } from "@/lib/supabase";
+import { supabaseBrowser } from "@/lib/supabase-browser";
 
 export default function Landing() {
   const signIn = async () => {

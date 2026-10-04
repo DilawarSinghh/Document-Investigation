@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { supabaseAdmin } from "../lib/supabase";
+import { supabaseAdmin } from "../lib/supabase-admin";
 import { chunkPages, extractDocDate } from "../lib/chunk";
 import { embedTexts } from "../lib/gemini";
 
