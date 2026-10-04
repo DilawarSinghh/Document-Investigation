@@ -68,6 +68,11 @@ export function AppShell() {
           <button onClick={() => set({ tab: "chat" })} className={`rounded px-3 py-1 ${tab === "chat" ? "bg-white text-black" : "border border-neutral-700"}`}>Chat</button>
           <button onClick={() => set({ tab: "conflicts" })} className={`rounded px-3 py-1 ${tab === "conflicts" ? "bg-white text-black" : "border border-neutral-700"}`}>Conflict Report</button>
         </div>
+        <button
+          onClick={async () => { await supabaseBrowser().auth.signOut(); window.location.href = "/"; }}
+          className="mt-2 w-full rounded px-3 py-1 text-left text-sm text-neutral-500 hover:text-neutral-200">
+          Sign out
+        </button>
       </aside>
       <main className="flex-1 overflow-y-auto p-4">{tab === "chat" ? <Chat /> : <ConflictReport docs={docs} />}</main>
       <SourceViewer />

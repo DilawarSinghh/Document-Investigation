@@ -26,6 +26,7 @@ export default function Landing() {
         <button onClick={signIn} className="rounded-lg bg-white px-5 py-3 font-medium text-black hover:bg-neutral-200">
           Continue with Google
         </button>
+        <a href="/login" className="rounded-lg border border-neutral-600 px-5 py-3 hover:bg-neutral-900">Sign in</a>
         <a href="/demo" className="rounded-lg border border-neutral-700 px-5 py-3 hover:bg-neutral-900">View demo seed</a>
       </div>
     </main>

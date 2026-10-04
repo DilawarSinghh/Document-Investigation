@@ -5,6 +5,6 @@ import { AppShell } from "@/components/AppShell";
 export default async function AppPage() {
   const sb = supabaseServer();
   const { data } = await sb.auth.getUser();
-  if (!data.user) redirect("/");
+  if (!data.user) redirect("/login");
   return <AppShell />;
 }
