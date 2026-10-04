@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+build/
+
+# env
+.env*.local
+.env
+
+# logs / os
+*.log
+.DS_Store
+Thumbs.db
+
+# supabase
+.branches/
+.temp/
+
+tsconfig.tsbuildinfo
