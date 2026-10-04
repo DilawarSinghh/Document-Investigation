@@ -5,14 +5,20 @@ import { requireUserId, requireOwnedWorkspace } from "@/lib/auth";
 export async function GET(req: Request) {
   const auth = await requireUserId();
   if ("response" in auth) return auth.response;
-  const ws = new URL(req.url).searchParams.get("workspace_id");
-  if (!ws) return NextResponse.json({ error: "workspace_id required" }, { status: 400 });
+  const url = new URL(req.url);
+  const ws = url.searchParams.get("workspace_id");
   const admin = supabaseAdmin();
-  const denied = await requireOwnedWorkspace(admin, ws, auth.userId);
-  if (denied) return denied.response;
-  const { data } = await admin.from("documents").select("id,filename,status,page_count,doc_date")
-    .eq("workspace_id", ws).eq("user_id", auth.userId).order("created_at");
-  return NextResponse.json({ documents: data ?? [] });
+
+  if (ws) {
+    const denied = await requireOwnedWorkspace(admin, ws, auth.userId);
+    if (denied) return denied.response;
+    const { data } = await admin.from("documents").select("id,filename,status,page_count,doc_date")
+      .eq("workspace_id", ws).eq("user_id", auth.userId).order("created_at");
+    return NextResponse.json({ documents: data ?? [] });
+  }
+
+  const { data } = await admin.from("workspaces").select("id,name").eq("user_id", auth.userId).order("created_at");
+  return NextResponse.json({ workspaces: data ?? [] });
 }
 
 export async function POST(req: Request) {

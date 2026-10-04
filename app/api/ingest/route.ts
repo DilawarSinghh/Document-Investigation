@@ -7,8 +7,8 @@ import { embedTexts, ocrImage, withBackoff } from "@/lib/gemini";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const ALLOWED = ["application/pdf", "text/plain", "text/markdown", "image/png", "image/jpeg",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+// Validation is by extension — browsers often send empty MIME types for .md/.docx.
+const EXTS = ["pdf", "png", "jpg", "jpeg", "txt", "md", "docx"];
 const MAX = 10 * 1024 * 1024;
 
 async function extractPdfPages(buf: ArrayBuffer): Promise<{ page: number; text: string }[]> {
@@ -22,57 +22,61 @@ async function extractPdfPages(buf: ArrayBuffer): Promise<{ page: number; text: 
 
 export async function POST(req: Request) {
   try {
-    const form = await req.formData();
-    const workspace_id = String(form.get("workspace_id") ?? "");
-    if (!workspace_id) return NextResponse.json({ error: "workspace_id required" }, { status: 400 });
-    // user_id always comes from the session — a spoofed client value could write into another user's data.
+    const { workspace_id, files } = await req.json();
+    if (!workspace_id || !Array.isArray(files) || !files.length)
+      return NextResponse.json({ error: "workspace_id and files required" }, { status: 400 });
     const auth = await requireUserId();
     if ("response" in auth) return auth.response;
-    const user_id = auth.userId;
-    const files = form.getAll("files").filter(Boolean) as File[];
-    if (!files.length) return NextResponse.json({ error: "No files" }, { status: 400 });
     const admin = supabaseAdmin();
-    const denied = await requireOwnedWorkspace(admin, workspace_id, user_id);
+    const denied = await requireOwnedWorkspace(admin, workspace_id, auth.userId);
     if (denied) return denied.response;
+
     const results: { filename: string; status: string; error?: string }[] = [];
 
     for (const f of files) {
       try {
-        if (!ALLOWED.includes(f.type) && !/\.(txt|md|pdf|png|jpe?g|docx)$/i.test(f.name))
-          throw new Error("Unsupported type");
-        if (f.size > MAX) throw new Error("File exceeds 10 MB");
-        const ab = await f.arrayBuffer();
+        const filename = String(f.filename ?? "");
+        const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+        if (!EXTS.includes(ext)) throw new Error("Unsupported type");
+        if (Number(f.size) > MAX) throw new Error("File exceeds 10 MB");
+        // The client only ever passes paths under its own user_id/workspace_id — enforce it.
+        const storage_path = String(f.storage_path ?? "");
+        if (!storage_path.startsWith(`${auth.userId}/${workspace_id}/`))
+          throw new Error("Invalid storage path");
+
+        const { data: blob, error: dlErr } = await admin.storage.from("documents").download(storage_path);
+        if (dlErr) throw new Error(`Could not read uploaded file: ${dlErr.message}`);
+        const ab = await blob.arrayBuffer();
         if (!ab.byteLength) throw new Error("Empty or corrupt file");
         const hash = await sha256(ab);
-        const dup = await admin.from("documents").select("id").eq("workspace_id", workspace_id).eq("file_hash", hash).limit(1);
-        if (dup.data?.length) { results.push({ filename: f.name, status: "ready", error: "duplicate skipped" }); continue; }
 
-        const storage_path = `${user_id}/${workspace_id}/${Date.now()}-${f.name}`;
-        const up = await admin.storage.from("documents").upload(storage_path, Buffer.from(ab), { contentType: f.type });
-        if (up.error) throw new Error(up.error.message);
+        const dup = await admin.from("documents").select("id").eq("workspace_id", workspace_id).eq("file_hash", hash).limit(1);
+        if (dup.data?.length) {
+          results.push({ filename, status: "ready", error: "duplicate skipped" });
+          continue;
+        }
+
         const doc = await admin.from("documents").insert({
-          workspace_id, user_id, filename: f.name, file_type: f.type || "unknown",
+          workspace_id, user_id: auth.userId, filename, file_type: ext,
           storage_path, file_hash: hash, status: "processing",
         }).select("id").single();
         if (doc.error) throw new Error(doc.error.message);
         const docId = doc.data.id as string;
 
-        // --- extract text per page ---
         let pages: { page: number; text: string }[] = [];
-        if (f.type === "application/pdf" || f.name.endsWith(".pdf")) {
+        if (ext === "pdf") {
           pages = await extractPdfPages(ab);
           const empty = pages.every((p) => p.text.trim().length < 20);
           if (empty) {
-            // scanned PDF: OCR first page image via Gemini (keep serverless-friendly: 1 call)
             const b64 = Buffer.from(ab.slice(0, 200000)).toString("base64");
             const ocr = await withBackoff(() => ocrImage(b64, "application/pdf").catch(() => ""));
             if (ocr) pages = [{ page: 1, text: ocr }];
           }
-        } else if (f.type.startsWith("image/")) {
+        } else if (ext === "png" || ext === "jpg" || ext === "jpeg") {
           const b64 = Buffer.from(ab).toString("base64");
-          const ocr = await withBackoff(() => ocrImage(b64, f.type));
+          const ocr = await withBackoff(() => ocrImage(b64, `image/${ext === "jpg" ? "jpeg" : ext}`));
           pages = [{ page: 1, text: ocr }];
-        } else if (f.name.endsWith(".docx")) {
+        } else if (ext === "docx") {
           const mammoth = await import("mammoth");
           const { value } = await mammoth.extractRawText({ buffer: Buffer.from(ab) });
           pages = [{ page: 1, text: value }];
@@ -85,11 +89,10 @@ export async function POST(req: Request) {
         const chunks = chunkPages(pages);
         const embeddings = await withBackoff(() => embedTexts(chunks.map((c) => c.content)));
         const rows = chunks.map((c, i) => ({
-          document_id: docId, workspace_id, user_id, content: c.content,
+          document_id: docId, workspace_id, user_id: auth.userId, content: c.content,
           page_number: c.page_number, section_title: c.section_title, chunk_index: i,
           embedding: `[${embeddings[i].join(",")}]`,
         }));
-        // insert in batches
         for (let i = 0; i < rows.length; i += 50) {
           const { error } = await admin.from("chunks").insert(rows.slice(i, i + 50));
           if (error) throw new Error(error.message);
@@ -97,9 +100,11 @@ export async function POST(req: Request) {
         await admin.from("documents").update({
           status: "ready", page_count: pages.length, doc_date: extractDocDate(fullText),
         }).eq("id", docId);
-        results.push({ filename: f.name, status: "ready" });
+        results.push({ filename, status: "ready" });
       } catch (e: unknown) {
-        results.push({ filename: f.name, status: "failed", error: e instanceof Error ? e.message : "ingest failed" });
+        const msg = e instanceof Error ? e.message : "ingest failed";
+        console.error("[ingest]", msg);
+        results.push({ filename: String(f.filename ?? "file"), status: "failed", error: msg });
       }
     }
     return NextResponse.json({ results });

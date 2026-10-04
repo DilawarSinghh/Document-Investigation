@@ -1,7 +1,11 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Search } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase-browser";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { Button } from "@/components/ui/button";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,7 +15,6 @@ export default function LoginPage() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Already logged in → go straight to the app
   useEffect(() => {
     supabaseBrowser().auth.getSession().then(({ data }) => {
       if (data.session) router.replace("/app");
@@ -24,53 +27,94 @@ export default function LoginPage() {
       provider: "google",
       options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
-    if (error) { setMsg(error.message); setBusy(false); }
+    if (error) {
+      setMsg(error.message);
+      setBusy(false);
+    }
   };
 
   const emailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true); setMsg("");
+    setBusy(true);
+    setMsg("");
     const sb = supabaseBrowser();
     const { error } =
       mode === "signin"
         ? await sb.auth.signInWithPassword({ email, password })
         : await sb.auth.signUp({ email, password });
     setBusy(false);
-    if (error) { setMsg(error.message); return; }
+    if (error) {
+      setMsg(error.message);
+      return;
+    }
     if (mode === "signup") setMsg("Account created! Check your email to confirm, then sign in.");
     else router.replace("/app");
   };
 
+  const inputCls =
+    "w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
-      <a href="/" className="text-sm text-neutral-500 hover:text-neutral-200">← Back</a>
-      <h1 className="mt-2 text-3xl font-bold">Sign in to Investigator</h1>
-      <p className="mt-1 text-sm text-neutral-400">Your documents stay private to your account (RLS-protected).</p>
+    <main className="relative mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
+      <a href="/" className="text-sm text-muted-foreground hover:text-foreground">
+        ← Back
+      </a>
 
-      <button onClick={google} disabled={busy}
-        className="mt-6 rounded-lg bg-white px-5 py-3 font-medium text-black hover:bg-neutral-200 disabled:opacity-50">
+      <div className="mt-4 flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <Search className="h-4 w-4" />
+        </span>
+        <h1 className="text-xl font-semibold">Investigator</h1>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Your documents stay private to your account.
+      </p>
+
+      <Button size="lg" onClick={google} disabled={busy} className="mt-8 w-full">
         Continue with Google
-      </button>
+      </Button>
 
-      <div className="my-4 flex items-center gap-2 text-xs text-neutral-500">
-        <span className="h-px flex-1 bg-neutral-800" /> or with email <span className="h-px flex-1 bg-neutral-800" />
+      <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        or with email
+        <span className="h-px flex-1 bg-border" />
       </div>
 
       <form onSubmit={emailAuth} className="space-y-3">
-        <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
-          className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm" />
-        <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (min 6 chars)"
-          className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm" />
-        <button disabled={busy} className="w-full rounded-lg border border-neutral-600 px-5 py-2 text-sm hover:bg-neutral-800 disabled:opacity-50">
+        <input
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          className={inputCls}
+        />
+        <input
+          type="password"
+          required
+          minLength={6}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password (min 6 chars)"
+          className={inputCls}
+        />
+        <Button type="submit" disabled={busy} className="w-full">
           {mode === "signin" ? "Sign in with email" : "Create account"}
-        </button>
+        </Button>
       </form>
 
-      <button onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-        className="mt-3 text-sm text-emerald-400 hover:underline">
+      <button
+        onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+        className="mt-4 text-sm text-primary hover:underline"
+      >
         {mode === "signin" ? "New here? Create an account" : "Have an account? Sign in"}
       </button>
-      {msg && <p className="mt-3 rounded-lg border border-neutral-800 bg-neutral-900 p-3 text-sm text-neutral-300">{msg}</p>}
+      {msg && (
+        <p className="mt-4 rounded-lg border border-border bg-card p-3 text-sm text-foreground">{msg}</p>
+      )}
     </main>
   );
 }

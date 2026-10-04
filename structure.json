@@ -1,5 +1,12 @@
 {
-  "folders": ["app/api/ingest", "app/api/ask", "app/api/conflict-report", "app/api/workspaces", "app/auth/callback", "app/app", "app/demo", "components", "lib", "store", "supabase/migrations", "demo", "scripts", "tests"],
-  "entrypoints": ["app/page.tsx (landing)", "app/app/page.tsx (protected /app)", "app/api/ingest/route.ts", "app/api/ask/route.ts"],
-  "sql": "supabase/migrations/0001_init.sql"
+  "folders": [
+    "app/api/ingest", "app/api/ask", "app/api/conflict-report", "app/api/workspaces",
+    "app/auth/callback", "app/app", "app/demo", "app/login",
+    "components/ui", "components", "lib", "store", "supabase/migrations", "demo", "scripts", "tests"
+  ],
+  "entrypoints": [
+    "app/page.tsx (landing)", "app/login/page.tsx", "app/app/page.tsx (protected /app)",
+    "app/api/ingest/route.ts", "app/api/ask/route.ts"
+  ],
+  "sql": "supabase/migrations/0001_init.sql · supabase/migrations/0002_storage.sql"
 }

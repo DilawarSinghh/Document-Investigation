@@ -1,81 +1,129 @@
 "use client";
-import { useEffect, useState } from "react";
+
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/store/useStore";
 import { supabaseBrowser } from "@/lib/supabase-browser";
+import { Header } from "./Header";
+import { Sidebar } from "./Sidebar";
 import { Chat } from "./Chat";
 import { SourceViewer } from "./SourceViewer";
 import { ConflictReport } from "./ConflictReport";
+import { CommandPalette } from "./CommandPalette";
+import { MobileNav } from "./MobileNav";
+import { cn } from "@/lib/utils";
 
 export function AppShell() {
-  const { workspaceId, set, tab } = useStore();
-  const [docs, setDocs] = useState<{ id: string; filename: string; status: string }[]>([]);
-  const [uploading, setUploading] = useState<string[]>([]);
+  const { workspaceId, docs, set, sidebarCollapsed, tab } = useStore();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const pollingRef = useRef(false);
+
+  const refreshDocs = useCallback(async () => {
+    const ws = useStore.getState().workspaceId;
+    if (!ws || pollingRef.current) return;
+    pollingRef.current = true;
+    try {
+      const res = await fetch(`/api/workspaces?workspace_id=${ws}`);
+      const j = await res.json();
+      if (res.ok) set({ docs: j.documents ?? [] });
+    } catch {
+      /* transient — next poll retries */
+    } finally {
+      pollingRef.current = false;
+    }
+  }, [set]);
 
   useEffect(() => {
     (async () => {
       const sb = supabaseBrowser();
-      const { data: { user } } = await sb.auth.getUser();
+      const {
+        data: { user },
+      } = await sb.auth.getUser();
       if (!user) return;
-      let ws = localStorage.getItem("ws");
-      if (!ws) {
-        const r = await fetch("/api/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, name: "My investigation" }) });
-        ws = (await r.json()).workspace_id;
-        localStorage.setItem("ws", ws!);
-      }
-      set({ workspaceId: ws });
-      const d = await fetch(`/api/workspaces?workspace_id=${ws}`).then((r) => r.json());
-      setDocs(d.documents ?? []);
-    })();
-  }, [set]);
 
-  const upload = async (files: FileList | null) => {
-    if (!files?.length || !workspaceId) return;
-    const sb = supabaseBrowser();
-    const { data: { user } } = await sb.auth.getUser();
-    setUploading(Array.from(files).map((f) => f.name));
-    const form = new FormData();
-    form.append("workspace_id", workspaceId);
-    form.append("user_id", user!.id);
-    Array.from(files).forEach((f) => form.append("files", f));
-    try {
-      const r = await fetch("/api/ingest", { method: "POST", body: form });
-      const j = await r.json();
-      alert(JSON.stringify(j.results ?? j, null, 2));
-      const d = await fetch(`/api/workspaces?workspace_id=${workspaceId}`).then((r) => r.json());
-      setDocs(d.documents ?? []);
-    } finally { setUploading([]); }
-  };
+      try {
+        const res = await fetch("/api/workspaces");
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || "Could not load workspaces");
+        const list = j.workspaces ?? [];
+        if (!list.length) {
+          const created = await fetch("/api/workspaces", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "My investigation" }),
+          });
+          const cj = await created.json();
+          if (!created.ok) throw new Error(cj.error || "Could not create workspace");
+          set({
+            workspaces: [{ id: cj.workspace_id, name: "My investigation" }],
+            workspaceId: cj.workspace_id,
+            workspaceName: "My investigation",
+          });
+          localStorage.setItem("ws", cj.workspace_id);
+        } else {
+          const saved = localStorage.getItem("ws");
+          const current = list.find((w: { id: string }) => w.id === saved) ?? list[0];
+          set({ workspaces: list, workspaceId: current.id, workspaceName: current.name });
+        }
+        await refreshDocs();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to load workspace");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [set, refreshDocs]);
+
+  // Keep document statuses fresh while indexing is in flight.
+  useEffect(() => {
+    if (!workspaceId) return;
+    const active = docs.some((d) => d.status === "processing");
+    if (!active) return;
+    const t = setInterval(refreshDocs, 3000);
+    return () => clearInterval(t);
+  }, [workspaceId, docs, refreshDocs]);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center" aria-label="Loading workspace">
+        <div className="space-y-3">
+          <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-56 animate-pulse rounded bg-muted" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-sm text-foreground">We could not load your workspace.</p>
+        <p className="text-sm text-muted-foreground">{error}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors duration-150 hover:bg-primary/90"
+        >
+          Reload
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-screen flex-col md:flex-row">
-      <aside className="w-full md:w-64 border-b md:border-b-0 md:border-r border-neutral-800 bg-neutral-900 p-4">
-        <h2 className="font-bold">Investigator</h2>
-        <label className="mt-3 block cursor-pointer rounded-lg border border-dashed border-neutral-700 p-4 text-center text-sm hover:bg-neutral-800">
-          Drop files / click to upload (PDF, PNG/JPG, TXT, MD, DOCX · 10MB)
-          <input type="file" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
-        </label>
-        {uploading.map((n) => <p key={n} className="mt-1 animate-pulse text-xs text-neutral-400">{n} — uploading…</p>)}
-        <ul className="mt-3 space-y-1 text-sm">
-          {docs.map((d) => (
-            <li key={d.id} className="flex justify-between rounded bg-neutral-800 px-2 py-1">
-              <span className="truncate">{d.filename}</span>
-              <span className={d.status === "ready" ? "text-emerald-400" : d.status === "failed" ? "text-red-400" : "text-amber-400"}>{d.status}</span>
-            </li>
-          ))}
-          {!docs.length && <li className="text-neutral-500">No documents yet.</li>}
-        </ul>
-        <div className="mt-4 flex gap-2 text-sm">
-          <button onClick={() => set({ tab: "chat" })} className={`rounded px-3 py-1 ${tab === "chat" ? "bg-white text-black" : "border border-neutral-700"}`}>Chat</button>
-          <button onClick={() => set({ tab: "conflicts" })} className={`rounded px-3 py-1 ${tab === "conflicts" ? "bg-white text-black" : "border border-neutral-700"}`}>Conflict Report</button>
+    <div className="flex h-screen flex-col overflow-hidden">
+      <Header />
+      <div className="flex min-h-0 flex-1">
+        <div className={cn(sidebarCollapsed && "hidden md:hidden")}>
+          <Sidebar workspaceId={workspaceId} docs={docs} onDocsChange={refreshDocs} />
         </div>
-        <button
-          onClick={async () => { await supabaseBrowser().auth.signOut(); window.location.href = "/"; }}
-          className="mt-2 w-full rounded px-3 py-1 text-left text-sm text-neutral-500 hover:text-neutral-200">
-          Sign out
-        </button>
-      </aside>
-      <main className="flex-1 overflow-y-auto p-4">{tab === "chat" ? <Chat /> : <ConflictReport docs={docs} />}</main>
-      <SourceViewer />
+        <main className="min-w-0 flex-1 overflow-hidden pb-14 md:pb-0">
+          {tab === "chat" ? <Chat /> : <ConflictReport docs={docs} />}
+        </main>
+        <SourceViewer />
+      </div>
+      <MobileNav />
+      <CommandPalette />
     </div>
   );
 }
